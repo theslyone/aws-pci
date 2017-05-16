@@ -60,7 +60,7 @@ Parameters:
     Type: String
     MinLength: 8
     MaxLength: 28
-    AllowedPattern: '[a-zA-Z0-9!^*\-_+]*'
+    AllowedPattern: '[a-zA-Z0-9!^*\-_+#]*'
     ConstraintDescription: Can only contain alphanumeric characters or the following
       special characters !^*-_+, between 8 and 28 characters
   pNotifyEmail:
