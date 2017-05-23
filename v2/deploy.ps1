@@ -94,25 +94,39 @@ Function update-web-config()
 
 Function install-ssh-server()
 {
-	New-Variable -Name "installer" -Value "BvSshServer-Inst.exe"
-	New-Variable -Name "installer_url" -Value "https://bvdl.s3-eu-west-1.amazonaws.com/BvSshServer-Inst.exe"
-	New-Variable -Name "installer_file" -Value ( Join-Path -Path $ENV:USERPROFILE -ChildPath $installer )
-	( New-Object Net.WebClient ).DownloadFile($installer_url, $installer_file)
-	Start-Process -FilePath $installer_file -ArgumentList @( "-acceptEULA", "-defaultSite" ) -Wait
+  $installer = "BvSshServer-Inst.exe"
+  $installer_url = "https://bvdl.s3-eu-west-1.amazonaws.com/BvSshServer-Inst.exe"
+  $installer_file = ( Join-Path -Path $ENV:USERPROFILE -ChildPath $installer )
+  ( New-Object Net.WebClient ).DownloadFile($installer_url, $installer_file)
+  Start-Process -FilePath $installer_file -ArgumentList @( "-acceptEULA", "-defaultSite" ) -Wait
 
-	New-Variable -Name "settings" -Value "bitvise-ssh-server-settings.txt"
-	New-Variable -Name "settings_file" -Value ( Join-Path -Path $ENV:USERPROFILE -ChildPath $settings )
-	New-Variable -Name "key" -Value "ssh-public-key.txt"
-	New-Variable -Name "key_file" -Value ( Join-Path -Path $ENV:USERPROFILE -ChildPath $key )
-	New-Variable -Name "key_url" -Value "http://169.254.169.254/latest/meta-data/public-keys/0/openssh-key"
-	( New-Object Net.WebClient ).DownloadFile($key_url, $key_file)
+  $key = "ssh-public-key.txt"
+  $key_file = ( Join-Path -Path $ENV:USERPROFILE -ChildPath $key )
+  $key_url = "http://169.254.169.254/latest/meta-data/public-keys/0/openssh-key"
+  ( New-Object Net.WebClient ).DownloadFile($key_url, $key_file)
 
-	Set-Content -Path $settings_file -Value "server.windowsFirewall.sshPortsFirewallSetting globalScope"
-	Add-Content -Path $settings_file -Value "access.winAccounts.New.winAccount `"Administrator`""
-	Add-Content -Path $settings_file -Value (( "access.winAccounts.New.keys.Import `""+$key_file+"`"" ).Replace("\", "\\"))
-	Add-Content -Path $settings_file -Value "access.winAccounts.NewCommit"
-	& ([System.IO.Path]::Combine($env:ProgramFiles, "BitVise SSH Server", "BssCfg.exe")) settings importText "$settings_file"
-	Shutdown /r /t 0 /d p:4:2 /c "Post install of SSH server"
+  $cfg = New-Object -com "BssCfg726.BssCfg726"
+  $cfg.LockServerSettings()
+  $cfg.LoadServerSettings()
+
+  $cfg.settings.server.windowsFirewall.sshPortsFirewallSetting =  $cfg.WindowsFirewallSetting.globalScope
+
+  $winAccount = "Administrator"
+  $cfg.settings.access.winAccountsEx.new.winDomain = "Local"
+  $cfg.settings.access.winAccountsEx.new.winAccount = $winAccount
+  $cfg.settings.access.winAccountsEx.new.loginAllowed = $cfg.DefaultYesNo.yes
+  $cfg.settings.access.winAccountsEx.NewCommit()
+
+  Foreach ($account in $cfg.settings.access.winAccounts)
+  {
+      If ($account.winAccount -eq $winAccount)
+      {
+          $account.auth.keys.Import("$key_file")
+      }
+  }
+
+  $cfg.SaveServerSettings()
+  $cfg.UnlockServerSettings()  
 }
 
 Function wait-until-website-has-state([string]$siteName, [string]$state)

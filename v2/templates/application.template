@@ -376,10 +376,6 @@ Resources:
         FromPort: 22
         ToPort: 22
         CidrIp: !Ref 'pManagementCIDR'
-      - IpProtocol: tcp
-        FromPort: '3389'
-        ToPort: '3389'
-        CidrIp: 0.0.0.0/0
       SecurityGroupEgress:
       - IpProtocol: tcp
         FromPort: 80
@@ -531,29 +527,6 @@ Resources:
         Value: Proxy ELB
       - Key: Environment
         Value: !Ref 'pEnvironment'
-
-  rEIPApp:
-    Type: AWS::EC2::EIP
-    Condition: cCanAccessAppInstance
-    Properties:
-      Domain: vpc
-  rAssociaterEIPApp:
-    Type: AWS::EC2::EIPAssociation
-    Condition: cCanAccessAppInstance
-    Properties:
-      AllocationId: !GetAtt rEIPApp.AllocationId
-      NetworkInterfaceId: !Ref rENIApp
-  rENIApp:
-    Condition: cCanAccessAppInstance
-    Type: AWS::EC2::NetworkInterface
-    Properties:
-      SubnetId: !Ref pDMZSubnetA
-      GroupSet:
-        - !Ref rSecurityGroupAppInstance
-      Description: Interface for App device
-      Tags:
-        - Key: Network
-          Value: AppDevice
 
   rRDSInstance:
     Type: AWS::RDS::DBInstance
@@ -787,7 +760,6 @@ Resources:
       SecurityGroups:
       - !Ref 'rSecurityGroupAppInstance'
       IamInstanceProfile: !Ref 'pSysAdminProfile'
-      AssociatePublicIpAddress: !If [ cCanAccessAppInstance, true, false ]
       UserData: !Base64
         'Fn::Sub': >
           <script>
@@ -798,6 +770,7 @@ Resources:
           # Run all deploy.ps1 files
           $executionPolicy = Get-ExecutionPolicy
           Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+
           Get-ChildItem c:\inetpub\deploy -recurse -force | ? {$_.name -eq "deploy.ps1"} |
               ForEach-Object {
                 Invoke-Expression ($_.FullName + '
@@ -813,6 +786,7 @@ Resources:
           Set-ExecutionPolicy -Scope Process -ExecutionPolicy $executionPolicy
           # Clean up the deploy directory
           Get-ChildItem c:\\inetpub\\deploy -recurse | Remove-Item -force -Recurse
+          Shutdown /r /t 0 /d p:4:2 /c "Post install app server"
           </powershell>
   rAutoScalingGroupApp:
     Type: AWS::AutoScaling::AutoScalingGroup
