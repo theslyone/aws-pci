@@ -6,11 +6,8 @@ Metadata:
   AWS::CloudFormation::Interface:
     ParameterGroups:
     - Label:
-        default: 'Please provide the following parameter values:'
+        default: 'Frapid PCI Infrastructure Configuration Parameters'
       Parameters:
-      - pDBName
-      - pDBUser
-      - pDBPassword
       - pNotifyEmail
       - pEC2KeyPairBastion
       - pEC2KeyPair
@@ -18,17 +15,36 @@ Metadata:
       - pAvailabilityZoneA
       - pAvailabilityZoneB
     - Label:
-        default: AWS Quick Start Configuration
+        default: S3 Bucket Parameters
       Parameters:
+      - pBucketRegion
       - QSS3BucketName
+      - pBucketAccessKey
+      - pBucketSecretKey
       - QSS3KeyPrefix
+      - pDeploymentPackage
+    - Label:
+        default: 'Database Parameters'
+      Parameters:
+      - pDBEngine
+      - pDBInstanceClass
+      - pDBAllocatedStorage
+      - pDBName
+      - pDBUser
+      - pDBPassword
     ParameterLabels:
+      pDBEngine:
+        default: Engine
+      pDBInstanceClass:
+        default: Instance class
+      pDBAllocatedStorage:
+        default: Allocated storage
       pDBName:
-        default: Database Name
+        default:  DB Name (Optional)
       pDBUser:
-        default: Database User
+        default:  Username
       pDBPassword:
-        default: Database Password
+        default: Password
       pNotifyEmail:
         default: Notification Email Address
       pEC2KeyPairBastion:
@@ -40,13 +56,21 @@ Metadata:
       pAvailabilityZoneA:
         default: First Availability Zone
       pAvailabilityZoneB:
-        default: Second Availability zone
+        default: Second Availability Zone
       pVPCTenancy:
         default: Instance tenancy
+      pBucketRegion:
+        default: S3 bucket region
+      pBucketAccessKey:
+        default: Bucket access key
+      pBucketSecretKey:
+        default: Bucket secret key
       QSS3BucketName:
-        default: Quick Start S3 Bucket Name
+        default: Bucket Name
       QSS3KeyPrefix:
-        default: Quick Start S3 Key Prefix
+        default: Version
+      pDeploymentPackage:
+        default: Deployment Package
   Stack:
     Value: 0
   VersionDate:
@@ -61,32 +85,42 @@ Parameters:
   pDBEngine:
     Description: The name of the database engine that the DB instance uses. Choose sqlserver-se (Sql Server Standard) or sqlserver-ee if you want a multi-az deployment.
     Type: String
-    Default: sqlserver-ex
+    Default: postgres
     AllowedValues:
       - sqlserver-ex
       - sqlserver-web
       - sqlserver-se
       - sqlserver-ee
+      - postgres
     ConstraintDescription : Must be a valid database engine type.
+  pDBInstanceClass:
+    Description: The name of the compute and memory capacity class of the DB instance. Must be db.m1.small or bigger for SQL Server Standard.
+    Type : String
+    Default: db.m3.large
+    AllowedValues: ["db.t1.micro","db.t2.micro","db.m1.small","db.m1.medium","db.m1.large","db.m1.xlarge","db.m3.medium","db.m3.large","db.m3.xlarge","db.m3.2xlarge","db.r3.large","db.r3.xlarge","db.r3.2xlarge","db.m2.xlarge","db.m2.2xlarge","db.m2.4xlarge"]
+    ConstraintDescription: must be a valid database server instance type.
+  pDBAllocatedStorage:
+    Description: The allocated storage size specified in gigabytes (GB). Must be at least 20GB for Sql Server Express, at least 200GB for Sql Server Standard.
+    Type: Number
+    Default: 200
   pDBName:
     Description: The name of the database
-    NoEcho: true
     Type: String
     MinLength: 1
     MaxLength: 30
-    Default: testDB
+    Default: sqlserver_localhost
     AllowedPattern: '[a-z_]*'
     ConstraintDescription: Must be lowercase and _ delimited based on domain name,
       between 1 and 30 characters
   pDBUser:
-    Description: The name of the database
-    NoEcho: true
+    Description: The name of the database user
     Type: String
     Default: testuserdb
   pDBPassword:
     Description: Mixed alphanumeric and must be between 8 and 28 characters and contain
       at least one capital letter
     NoEcho: true
+    Default: "*Passw0rd#"
     Type: String
     MinLength: 8
     MaxLength: 28
@@ -128,26 +162,44 @@ Parameters:
     AllowedValues:
     - default
     - dedicated
+  pBucketRegion:
+    Default: us-west-2
+    Description: S3 bucket region.
+    Type: String
+  pBucketAccessKey:
+    Default: AKIAJKYWWGKLKFZGVU6A
+    Description: S3 bucket access key.
+    Type: String
+  pBucketSecretKey:
+    Default: ziZeDnKBDMkhPRGPr8WUwZUi/iCDuCdgtEQuZ4MX
+    Description: S3 bucket secret key.
+    Type: String
   QSS3BucketName:
     AllowedPattern: ^[0-9a-zA-Z]+([0-9a-zA-Z-.]*[0-9a-zA-Z])*$
-    ConstraintDescription: Quick Start bucket name can include numbers, lowercase
+    ConstraintDescription: Bucket name can include numbers, lowercase
       letters, uppercase letters, periods (.), and hyphens (-). It cannot start or
       end with a hyphen (-).
-    Default: quickstart-reference
-    Description: S3 bucket name for the Quick Start assets. Quick Start bucket name
+    Default: freebe-bucket
+    Description: S3 bucket name for the assets. Bucket name
       can include numbers, lowercase letters, uppercase letters, and hyphens (-).
       It cannot start or end with a hyphen (-).
     Type: String
   QSS3KeyPrefix:
     AllowedPattern: ^[0-9a-zA-Z-]+(/[0-9a-zA-Z-]+)*$
-    ConstraintDescription: Quick Start key prefix can include numbers, lowercase letters,
+    ConstraintDescription: Version can include numbers, lowercase letters,
       uppercase letters, hyphens (-), and forward slash (/). It cannot start or end
       with forward slash (/) because they are automatically appended.
-    Default: enterprise-accelerator/pci/latest
-    Description: S3 key prefix for the Quick Start assets. Quick Start key prefix
+    Default: v2
+    Description: Application version folder for deployment template and assets. Version
       can include numbers, lowercase letters, uppercase letters, hyphens (-), and
       forward slash (/). It cannot start or end with forward slash (/) because they
       are automatically appended.
+    Type: String
+  pDeploymentPackage:
+    Default: app
+    Description: Webserver application deployment package name stored in s3 bucket.
+      This zip package is unzipped to a temp directory on the webserver and all deploy.psi scripts
+      found within are executed to deploy and publish the application to IIS.
     Type: String
 Mappings:
   AWSInfoRegionMap:
@@ -267,63 +319,93 @@ Mappings:
       AMZNLINUXHVM: amzn-ami-hvm-2017.03.0.20170417-x86_64-gp2
     ap-northeast-1:
       AMZNLINUXHVM: ami-923d12f5
-      InstanceType: m4.large
+      AMZNWINDOWSHVM: ami-0185e161
+      WindowsInstanceType: m4.large
+      LinuxInstanceType: t2.small
       InstanceTypeDatabase: db.m4.large
     ap-northeast-2:
       AMZNLINUXHVM: ami-9d15c7f3
-      InstanceType: m4.large
+      AMZNWINDOWSHVM: ami-0185e161
+      WindowsInstanceType: m4.large
+      LinuxInstanceType: t2.small
       InstanceTypeDatabase: db.m4.large
     ap-south-1:
       AMZNLINUXHVM: ami-52c7b43d
-      InstanceType: m4.large
+      AMZNWINDOWSHVM: ami-0185e161
+      WindowsInstanceType: m4.large
+      LinuxInstanceType: t2.small
       InstanceTypeDatabase: db.m4.large
     ap-southeast-1:
       AMZNLINUXHVM: ami-fc5ae39f
-      InstanceType: m4.large
+      AMZNWINDOWSHVM: ami-0185e161
+      WindowsInstanceType: m4.large
+      LinuxInstanceType: t2.small
       InstanceTypeDatabase: db.m4.large
     ap-southeast-2:
       AMZNLINUXHVM: ami-162c2575
-      InstanceType: m4.large
+      AMZNWINDOWSHVM: ami-0185e161
+      WindowsInstanceType: m4.large
+      LinuxInstanceType: t2.small
       InstanceTypeDatabase: db.m4.large
     ca-central-1:
       AMZNLINUXHVM: ami-0bd66a6f
-      InstanceType: m4.large
+      AMZNWINDOWSHVM: ami-0185e161
+      WindowsInstanceType: m4.large
+      LinuxInstanceType: t2.small
       InstanceTypeDatabase: db.m4.large
     eu-central-1:
-      AMZNLINUXHVM: ami-b968bad6
-      InstanceType: m4.large
+      AMZNLINUXHVM: ami-4836a428
+      AMZNWINDOWSHVM: ami-0185e161
+      WindowsInstanceType: m4.large
+      LinuxInstanceType: t2.small
       InstanceTypeDatabase: db.m4.large
     eu-west-1:
-      AMZNLINUXHVM: ami-01ccc867
-      InstanceType: m4.large
+      AMZNLINUXHVM: ami-4836a428
+      AMZNWINDOWSHVM: ami-0185e161
+      WindowsInstanceType: m4.large
+      LinuxInstanceType: t2.small
       InstanceTypeDatabase: db.m4.large
     eu-west-2:
-      AMZNLINUXHVM: ami-b6daced2
-      InstanceType: m4.large
+      AMZNLINUXHVM: ami-4836a428
+      AMZNWINDOWSHVM: ami-0185e161
+      WindowsInstanceType: m4.large
+      LinuxInstanceType: t2.small
       InstanceTypeDatabase: db.m4.large
     sa-east-1:
       AMZNLINUXHVM: ami-37cfad5b
-      InstanceType: m4.large
+      AMZNWINDOWSHVM: ami-0185e161
+      WindowsInstanceType: m4.large
+      LinuxInstanceType: t2.small
       InstanceTypeDatabase: db.m3.large
     us-east-1:
       AMZNLINUXHVM: ami-c58c1dd3
-      InstanceType: m4.large
+      AMZNWINDOWSHVM: ami-0185e161
+      WindowsInstanceType: m4.large
+      LinuxInstanceType: t2.small
       InstanceTypeDatabase: db.m4.large
     us-east-2:
       AMZNLINUXHVM: ami-4191b524
-      InstanceType: m4.large
+      AMZNWINDOWSHVM: ami-0185e161
+      WindowsInstanceType: m4.large
+      LinuxInstanceType: t2.small
       InstanceTypeDatabase: db.m4.large
     us-gov-west-1:
       AMZNLINUXHVM: ami-ffa61d9e
-      InstanceType: m4.large
+      AMZNWINDOWSHVM: ami-0185e161
+      WindowsInstanceType: m4.large
+      LinuxInstanceType: t2.small
       InstanceTypeDatabase: db.m3.large
     us-west-1:
-      AMZNLINUXHVM: ami-7a85a01a
-      InstanceType: m4.large
+      AMZNLINUXHVM: ami-9b29b9fb
+      AMZNWINDOWSHVM: ami-9b29b9fb
+      WindowsInstanceType: m4.large
+      LinuxInstanceType: t2.small
       InstanceTypeDatabase: db.m4.large
     us-west-2:
       AMZNLINUXHVM: ami-4836a428
-      InstanceType: m4.large
+      AMZNWINDOWSHVM: ami-0185e161
+      WindowsInstanceType: m4.large
+      LinuxInstanceType: t2.small
       InstanceTypeDatabase: db.m4.large
 Conditions:
   LoadConfigRulesTemplate:
@@ -411,7 +493,7 @@ Resources:
           !FindInMap
           - AWSAMIRegionMap
           - !Ref AWS::Region
-          - InstanceType
+          - LinuxInstanceType
         QuickStartS3URL:
           !FindInMap
           - AWSInfoRegionMap
@@ -431,7 +513,7 @@ Resources:
             - AWSInfoRegionMap
             - !Ref AWS::Region
             - QuickStartS3URL
-      TimeoutInMinutes: 30
+      TimeoutInMinutes: 35
       Parameters:
         pSecurityAlarmTopic:
           !GetAtt
@@ -463,12 +545,12 @@ Resources:
           !FindInMap
           - AWSAMIRegionMap
           - !Ref AWS::Region
-          - InstanceType
+          - LinuxInstanceType
         pAppInstanceType:
           !FindInMap
           - AWSAMIRegionMap
           - !Ref AWS::Region
-          - InstanceType
+          - WindowsInstanceType
         pDBPrivateSubnetA:
           !GetAtt
           - ProductionVpcTemplate
@@ -489,17 +571,13 @@ Resources:
           !FindInMap
           - AWSAMIRegionMap
           - !Ref AWS::Region
-          - AMZNLINUXHVM
+          - AMZNWINDOWSHVM
         pDBEngine: !Ref pDBEngine
         pDBUser: !Ref pDBUser
         pDBName: !Ref pDBName
         pDBPassword: !Ref pDBPassword
-        pDBClass:
-          !FindInMap
-          - AWSAMIRegionMap
-          - !Ref AWS::Region
-          - InstanceTypeDatabase
-        pDBAllocatedStorage: 10
+        pDBClass: !Ref pDBInstanceClass
+        pDBAllocatedStorage: !Ref pDBAllocatedStorage
         pEnvironment:
           !FindInMap
           - CustomVariables
@@ -516,23 +594,141 @@ Resources:
           - AWSInfoRegionMap
           - !Ref AWS::Region
           - QuickStartS3URL
+        pBucketRegion: !Ref pBucketRegion
         QSS3BucketName: !Ref QSS3BucketName
         QSS3KeyPrefix: !Ref QSS3KeyPrefix
+        pBucketAccessKey: !Ref pBucketAccessKey
+        pBucketSecretKey: !Ref pBucketSecretKey
+        pDeploymentPackage: !Ref pDeploymentPackage
+        pSysAdminProfile:
+          !GetAtt
+          - IamTemplate
+          - Outputs.rSysAdminProfile
+        pSysAdminRole:
+          !GetAtt
+          - IamTemplate
+          - Outputs.rSysAdminRole
+  ManagementVpcTemplate:
+    Type: AWS::CloudFormation::Stack
+    DependsOn: ProductionVpcTemplate
+    Properties:
+      TemplateURL:
+        !Sub
+        - ${QuickStartS3URL}/${QSS3BucketName}/${QSS3KeyPrefix}/submodules/templates/vpc-management.template
+        - QuickStartS3URL:
+            !FindInMap
+            - AWSInfoRegionMap
+            - !Ref AWS::Region
+            - QuickStartS3URL
+      TimeoutInMinutes: 20
+      Parameters:
+        pProductionVPC:
+          !GetAtt
+          - ProductionVpcTemplate
+          - Outputs.rVPCProduction
+        pRouteTableProdPrivate:
+          !GetAtt
+          - ProductionVpcTemplate
+          - Outputs.rRouteTableProdPrivate
+        pRouteTableProdPublic:
+          !GetAtt
+          - ProductionVpcTemplate
+          - Outputs.rRouteTableProdPublic
+        pProductionCIDR: 10.100.0.0/16
+        pBastionSSHCIDR: 0.0.0.0/0
+        pManagementCIDR: 10.10.0.0/16
+        pManagementDMZSubnetACIDR: 10.10.1.0/24
+        pManagementDMZSubnetBCIDR: 10.10.2.0/24
+        pManagementPrivateSubnetACIDR: 10.10.20.0/24
+        pManagementPrivateSubnetBCIDR: 10.10.30.0/24
+        pManagementVPCName: Management VPC
+        pEC2KeyPairBastion: !Ref pEC2KeyPairBastion
+        pEC2KeyPair: !Ref pEC2KeyPair
+        pVPCTenancy: !Ref pVPCTenancy
+        pBastionAmi:
+          !FindInMap
+          - AWSAMIRegionMap
+          - !Ref AWS::Region
+          - AMZNLINUXHVM
+        pRegionAZ1Name: !Ref pAvailabilityZoneA
+        pRegionAZ2Name: !Ref pAvailabilityZoneB
+        pEnvironment:
+          !FindInMap
+          - CustomVariables
+          - vResourceEnvironmentTagValue
+          - Value
+        pBastionInstanceType:
+          !If
+          - LaunchAsDedicatedInstance
+          - m4.large
+          - t2.small
+        pSupportsNatGateway:
+          !FindInMap
+          - RegionServiceSupport
+          - !Ref AWS::Region
+          - NatGateway
+        pNatAmi:
+          !FindInMap
+          - AWSAMIRegionMap
+          - !Ref AWS::Region
+          - AMZNLINUXHVM
+        pNatInstanceType:
+          !FindInMap
+          - AWSAMIRegionMap
+          - !Ref AWS::Region
+          - LinuxInstanceType
+        QuickStartS3URL:
+          !FindInMap
+          - AWSInfoRegionMap
+          - !Ref AWS::Region
+          - QuickStartS3URL
+        QSS3BucketName: !Ref QSS3BucketName
+        QSS3KeyPrefix: !Ref QSS3KeyPrefix
+  ConfigRulesTemplate:
+    Type: AWS::CloudFormation::Stack
+    Condition: LoadConfigRulesTemplate
+    DependsOn:
+    - IamTemplate
+    - ProductionVpcTemplate
+    - ManagementVpcTemplate
+    - LoggingTemplate
+    Properties:
+      TemplateURL:
+        !Sub
+        - ${QuickStartS3URL}/${QSS3BucketName}/${QSS3KeyPrefix}/submodules/templates/config-rules.template
+        - QuickStartS3URL:
+            !FindInMap
+            - AWSInfoRegionMap
+            - !Ref AWS::Region
+            - QuickStartS3URL
+      TimeoutInMinutes: 20
+      Parameters:
+        pRequiredTagKey:
+          !FindInMap
+          - CustomVariables
+          - vResourceEnvironmentTagKey
+          - Value
 Outputs:
   TemplateType:
-    Value: Standard Multi-Tier Web Application
+    Value: Frapid Multi-Tenant Web Application
   TemplateVersion:
     Value: 2.0
-  LandingPageURL:
+  BastionIP:
+    Description: Use this IP via SSH to connect to Bastion Instance
     Value:
       !GetAtt
-      - ApplicationTemplate
-      - Outputs.LandingPageURL
+      - ManagementVpcTemplate
+      - Outputs.rBastionInstanceIP
   WebsiteURL:
     Value:
       !GetAtt
       - ApplicationTemplate
       - Outputs.WebsiteURL
+  InstallURL:
+    Value:
+      !GetAtt
+      - ApplicationTemplate
+      - Outputs.InstallURL
   Help:
     Description: For assistance or questions regarding this quickstart please email
       compliance-accelerator@amazon.com

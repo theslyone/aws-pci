@@ -1,0 +1,686 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: >-
+  Creates a load balanced and auto scaled web site running under IIS. It uses a
+  SQL Server Standard Edition database with multi-az deployment, so if the
+  database server fails, it automatically fails over to a hot standby. It
+  deploys the web site code to the auto scaling group, so it can be installed on
+  new EC2 web servers.
+Parameters:
+  Version:
+    Description: >-
+      Code version to be deployed. This doubles as the key of the zip file with
+      deployed files in the S3 bucket.
+    Type: String
+  WebsiteDomain:
+    Description: 'Domain of the web site, using Route 53.'
+    Type: String
+  KeyName:
+    Description: The EC2 Key Pair to allow RDP access to the instances
+    Type: 'AWS::EC2::KeyPair::KeyName'
+    ConstraintDescription: must be the name of an existing EC2 KeyPair.
+  AdminCidr:
+    Description: >-
+      IP Cidr that is allowed to RDP to EC2 instances and SSMS into RDS
+      instances
+    Type: String
+    MinLength: '9'
+    MaxLength: '18'
+    AllowedPattern: '^([0-9]+\.){3}[0-9]+\/[0-9]+$'
+  DbMasterUsername:
+    Description: The master user name for the database instance.
+    Type: String
+  DbMasterUserPassword:
+    Description: The master password for the database instance.
+    Type: String
+    NoEcho: 'true'
+  DeploymentBucketName:
+    Description: Name of bucket containing the zip file with deployed files.
+    Type: String
+  InstanceType:
+    Description: WebServer EC2 instance type
+    Type: String
+    Default: t2.micro
+    AllowedValues:
+      - t1.micro
+      - t2.micro
+      - t2.small
+      - t2.medium
+      - m1.small
+      - m1.medium
+      - m1.large
+      - m1.xlarge
+      - m2.xlarge
+      - m2.2xlarge
+      - m2.4xlarge
+      - m3.medium
+      - m3.large
+      - m3.xlarge
+      - m3.2xlarge
+      - c1.medium
+      - c1.xlarge
+      - c3.large
+      - c3.xlarge
+      - c3.2xlarge
+      - c3.4xlarge
+      - c3.8xlarge
+      - c4.large
+      - c4.xlarge
+      - c4.2xlarge
+      - c4.4xlarge
+      - c4.8xlarge
+      - g2.2xlarge
+      - r3.large
+      - r3.xlarge
+      - r3.2xlarge
+      - r3.4xlarge
+      - r3.8xlarge
+      - i2.xlarge
+      - i2.2xlarge
+      - i2.4xlarge
+      - i2.8xlarge
+      - hi1.4xlarge
+      - hs1.8xlarge
+      - cr1.8xlarge
+      - cc2.8xlarge
+      - cg1.4xlarge
+    ConstraintDescription: must be a valid EC2 instance type.
+  ImageId:
+    Description: Id of the AMI to be loaded on the EC2 instances
+    Type: String
+  DBInstanceClass:
+    Description: >-
+      The name of the compute and memory capacity class of the DB instance. Must
+      be db.m1.small or bigger for SQL Server Standard.
+    Type: String
+    Default: db.m1.small
+    AllowedValues:
+      - db.t1.micro
+      - db.m1.small
+      - db.m1.medium
+      - db.m1.large
+      - db.m1.xlarge
+      - db.m3.medium
+      - db.m3.large
+      - db.m3.xlarge
+      - db.m3.2xlarge
+      - db.r3.large
+      - db.r3.xlarge
+      - db.r3.2xlarge
+      - db.m2.xlarge
+      - db.m2.2xlarge
+      - db.m2.4xlarge
+    ConstraintDescription: must be a valid database server instance type.
+  DBEngine:
+    Description: >-
+      The name of the database engine that the DB instance uses. Choose
+      sqlserver-se (Sql Server Standard) or sqlserver-ee if you want a multi-az
+      deployment.
+    Type: String
+    Default: sqlserver-se
+    AllowedValues:
+      - sqlserver-ex
+      - sqlserver-web
+      - sqlserver-se
+      - sqlserver-ee
+    ConstraintDescription: must be a valid database engine type.
+  DbAllocatedStorage:
+    Description: >-
+      The allocated storage size specified in gigabytes (GB). Must be at least
+      20GB for Sql Server Express, at least 200GB for Sql Server Standard.
+    Type: Number
+    Default: '200'
+    MinValue: '200'
+    ConstraintDescription: Allocated storage must be at least 20GB.
+  DbOptionGroupName:
+    Description: >-
+      For a multi-az deployment, set this to the name of an option group that
+      has the SQL Server mirroring option. Sql Server Express and Web do not
+      support mirroring and so cannot be used in a multi-az deployment. Set this
+      parameter to empty string for those engines.
+    Type: String
+    Default: ''
+  VpcId:
+    Description: Id of your VPC.
+    Type: String
+  VpcSubnetIds:
+    Description: Ids of the subnets in your region.
+    Type: CommaDelimitedList
+Resources:
+  DbInstance:
+    Type: 'AWS::RDS::DBInstance'
+    Properties:
+      OptionGroupName: !Ref DbOptionGroupName
+      AllowMajorVersionUpgrade: 'false'
+      AutoMinorVersionUpgrade: 'true'
+      DBInstanceClass: !Ref DBInstanceClass
+      Port: '1433'
+      AllocatedStorage: !Ref DbAllocatedStorage
+      PubliclyAccessible: 'true'
+      StorageType: standard
+      BackupRetentionPeriod: '7'
+      Engine: !Ref DBEngine
+      EngineVersion: 11.00.2100.60.v1
+      LicenseModel: license-included
+      PreferredBackupWindow: '04:34-05:04'
+      PreferredMaintenanceWindow: 'wed:06:46-wed:07:16'
+      MasterUsername: !Ref DbMasterUsername
+      MasterUserPassword: !Ref DbMasterUserPassword
+      DBSubnetGroupName: !Ref DBSubnetGroup
+      VPCSecurityGroups:
+        - !Ref SSMSSecurityGroup
+    DeletionPolicy: Snapshot
+    Metadata:
+      'AWS::CloudFormation::Designer':
+        id: e7a4d31e-6743-4ed1-b296-e7f2f56fa85b
+  DBSubnetGroup:
+    Type: 'AWS::RDS::DBSubnetGroup'
+    Properties:
+      DBSubnetGroupDescription: default
+      SubnetIds: !Ref VpcSubnetIds
+    Metadata:
+      'AWS::CloudFormation::Designer':
+        id: 6e6c394d-9f21-429e-b206-c5e834e3a903
+  SSMSSecurityGroup:
+    Type: 'AWS::EC2::SecurityGroup'
+    Properties:
+      GroupDescription: Enable SSMS only
+      VpcId: !Ref VpcId
+    Metadata:
+      'AWS::CloudFormation::Designer':
+        id: 7085b267-31b5-495a-a29c-29c0fefd6fca
+  ingress2:
+    Type: 'AWS::EC2::SecurityGroupIngress'
+    Properties:
+      GroupId: !Ref SSMSSecurityGroup
+      IpProtocol: tcp
+      FromPort: '1433'
+      ToPort: '1433'
+      SourceSecurityGroupId: !GetAtt
+        - WebInstanceSecurityGroup
+        - GroupId
+    Metadata:
+      'AWS::CloudFormation::Designer':
+        id: 0878b998-b92e-44df-bea8-cabc8881aed6
+  ingress3:
+    Type: 'AWS::EC2::SecurityGroupIngress'
+    Properties:
+      GroupId: !Ref SSMSSecurityGroup
+      IpProtocol: tcp
+      FromPort: '1433'
+      ToPort: '1433'
+      CidrIp: !Ref AdminCidr
+  egress2:
+    Type: 'AWS::EC2::SecurityGroupEgress'
+    Properties:
+      GroupId: !Ref SSMSSecurityGroup
+      IpProtocol: '-1'
+      CidrIp: 0.0.0.0/0
+  InstanceRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - ec2.amazonaws.com
+            Action:
+              - 'sts:AssumeRole'
+      Path: /
+    Metadata:
+      'AWS::CloudFormation::Designer':
+        id: 871709db-a124-4a32-847d-8c992bf2d9ef
+  RolePolicies:
+    Type: 'AWS::IAM::Policy'
+    Properties:
+      PolicyName: S3Download
+      PolicyDocument:
+        Statement:
+          - Action:
+              - 's3:GetObject'
+            Effect: Allow
+            Resource: !Join
+              - ''
+              - - 'arn:aws:s3:::'
+                - !Ref DeploymentBucketName
+                - /
+                - !Ref Version
+                - .zip
+      Roles:
+        - !Ref InstanceRole
+    Metadata:
+      'AWS::CloudFormation::Designer':
+        id: 64fa001c-c8df-4c6c-a458-880d0768bb69
+  InstanceProfile:
+    Type: 'AWS::IAM::InstanceProfile'
+    Properties:
+      Path: /
+      Roles:
+        - !Ref InstanceRole
+    Metadata:
+      'AWS::CloudFormation::Designer':
+        id: dfba33f2-da88-49de-a850-3373b5f3c867
+  WebServerGroup:
+    Type: 'AWS::AutoScaling::AutoScalingGroup'
+    Properties:
+      AvailabilityZones: !GetAZs ''
+      LaunchConfigurationName: !Ref LaunchConfig
+      MinSize: '1'
+      MaxSize: '3'
+      Tags:
+        - Key: Version
+          Value: !Ref Version
+          PropagateAtLaunch: 'true'
+      LoadBalancerNames:
+        - !Ref ElasticLoadBalancer
+    UpdatePolicy:
+      AutoScalingRollingUpdate:
+        MinInstancesInService: '1'
+        MaxBatchSize: '1'
+        PauseTime: PT15M
+        WaitOnResourceSignals: 'false'
+    Metadata:
+      'AWS::CloudFormation::Designer':
+        id: a6fd43e6-75c0-47f2-b9ac-109c583874b8
+  LaunchConfig:
+    Type: 'AWS::AutoScaling::LaunchConfiguration'
+    Metadata:
+      Version: !Ref Version
+      'AWS::CloudFormation::Authentication':
+        default:
+          type: s3
+          buckets:
+            - !Ref DeploymentBucketName
+          roleName: !Ref InstanceRole
+      'AWS::CloudFormation::Init':
+        config:
+          sources:
+            'c:\inetpub\deploy': !Join
+              - ''
+              - - 'https://'
+                - !Ref DeploymentBucketName
+                - .s3.amazonaws.com/
+                - !Ref Version
+                - .zip
+      'AWS::CloudFormation::Designer':
+        id: 2f88c666-c5ae-49b2-b3f8-7ec6e1423a5c
+    Properties:
+      KeyName: !Ref KeyName
+      ImageId: !Ref ImageId
+      SecurityGroups:
+        - !Ref WebInstanceSecurityGroup
+      InstanceType: !Ref InstanceType
+      IamInstanceProfile: !Ref InstanceProfile
+      UserData: !Base64
+        'Fn::Join':
+          - ''
+          - - |
+              <script>
+            - 'cfn-init.exe -v -s '
+            - !Ref 'AWS::StackId'
+            - ' -r LaunchConfig --region '
+            - !Ref 'AWS::Region'
+            - |+
+
+            - |
+              </script>
+            - |
+              <powershell>
+            - |
+              # Run all deploy.ps1 files
+            - |
+              $executionPolicy = Get-ExecutionPolicy
+            - |
+              Set-ExecutionPolicy Bypass -Scope Process -force
+            - >
+              get-childitem c:\inetpub\deploy -recurse -force | ?{$_.name -eq
+              "deploy.ps1"} |
+            - '    ForEach-Object { Invoke-Expression ($_.FullName + '''
+            - ' -version '''''
+            - !Ref Version
+            - ''''''
+            - ' -dbServer '''''
+            - !GetAtt
+              - DbInstance
+              - Endpoint.Address
+            - ''''''
+            - ' -dbUsername '''''
+            - !Ref DbMasterUsername
+            - ''''''
+            - ' -dbPassword '''''
+            - !Ref DbMasterUserPassword
+            - ''''''
+            - |
+              ') }
+            - |
+              Set-ExecutionPolicy $executionPolicy -Scope Process -force
+            - |
+              # Clean up the deploy directory
+            - >
+              Get-ChildItem c:\inetpub\deploy -Recurse | Remove-Item -force
+              -Recurse
+            - |
+              </powershell>
+  WebServerScaleUpPolicy:
+    Type: 'AWS::AutoScaling::ScalingPolicy'
+    Properties:
+      AdjustmentType: ChangeInCapacity
+      AutoScalingGroupName: !Ref WebServerGroup
+      Cooldown: '60'
+      ScalingAdjustment: '1'
+    Metadata:
+      'AWS::CloudFormation::Designer':
+        id: 6fb5aff2-5d37-4c51-9374-27728ef032ad
+  WebServerScaleDownPolicy:
+    Type: 'AWS::AutoScaling::ScalingPolicy'
+    Properties:
+      AdjustmentType: ChangeInCapacity
+      AutoScalingGroupName: !Ref WebServerGroup
+      Cooldown: '60'
+      ScalingAdjustment: '-1'
+    Metadata:
+      'AWS::CloudFormation::Designer':
+        id: 2350f3c9-7f83-4136-ad4d-dde28561b360
+  CPUAlarmHigh:
+    Type: 'AWS::CloudWatch::Alarm'
+    Properties:
+      AlarmDescription: Scale-up if CPU > 90% for 10 minutes
+      MetricName: CPUUtilization
+      Namespace: AWS/EC2
+      Statistic: Average
+      Period: '300'
+      EvaluationPeriods: '2'
+      Threshold: '90'
+      AlarmActions:
+        - !Ref WebServerScaleUpPolicy
+      Dimensions:
+        - Name: AutoScalingGroupName
+          Value: !Ref WebServerGroup
+      ComparisonOperator: GreaterThanThreshold
+    Metadata:
+      'AWS::CloudFormation::Designer':
+        id: 98d52891-1ac0-4b2d-bb1a-acbead2c932d
+  CPUAlarmLow:
+    Type: 'AWS::CloudWatch::Alarm'
+    Properties:
+      AlarmDescription: Scale-down if CPU < 70% for 10 minutes
+      MetricName: CPUUtilization
+      Namespace: AWS/EC2
+      Statistic: Average
+      Period: '300'
+      EvaluationPeriods: '2'
+      Threshold: '70'
+      AlarmActions:
+        - !Ref WebServerScaleDownPolicy
+      Dimensions:
+        - Name: AutoScalingGroupName
+          Value: !Ref WebServerGroup
+      ComparisonOperator: LessThanThreshold
+    Metadata:
+      'AWS::CloudFormation::Designer':
+        id: 2ea882d3-0dd2-4360-b92c-6b6bfee96369
+  ElasticLoadBalancer:
+    Type: 'AWS::ElasticLoadBalancing::LoadBalancer'
+    Properties:
+      AvailabilityZones: !GetAZs ''
+      CrossZone: 'true'
+      Listeners:
+        - LoadBalancerPort: '80'
+          InstancePort: '80'
+          Protocol: HTTP
+      HealthCheck:
+        Target: 'HTTP:80/'
+        HealthyThreshold: '3'
+        UnhealthyThreshold: '5'
+        Interval: '30'
+        Timeout: '5'
+    Metadata:
+      'AWS::CloudFormation::Designer':
+        id: 7b3b4a43-5909-485a-a73a-1ce3e749160a
+  WebInstanceSecurityGroup:
+    Type: 'AWS::EC2::SecurityGroup'
+    Properties:
+      GroupDescription: 'Enable RDP, and HTTP from the load balancer only'
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: '3389'
+          ToPort: '3389'
+          CidrIp: !Ref AdminCidr
+        - IpProtocol: tcp
+          FromPort: '80'
+          ToPort: '80'
+          SourceSecurityGroupOwnerId: !GetAtt
+            - ElasticLoadBalancer
+            - SourceSecurityGroup.OwnerAlias
+          SourceSecurityGroupName: !GetAtt
+            - ElasticLoadBalancer
+            - SourceSecurityGroup.GroupName
+    Metadata:
+      'AWS::CloudFormation::Designer':
+        id: c0744c52-8c26-413c-9090-4a92c5c5a6d8
+  HostedZone:
+    Type: 'AWS::Route53::HostedZone'
+    Properties:
+      HostedZoneConfig:
+        Comment: My hosted zone for example.com
+      Name: !Join
+        - ''
+        - - !Ref WebsiteDomain
+          - .
+    Metadata:
+      'AWS::CloudFormation::Designer':
+        id: c1fa8924-93e8-4ec7-8b62-195ce2ae3cf6
+  RecordSetGroup:
+    Type: 'AWS::Route53::RecordSetGroup'
+    Properties:
+      HostedZoneId: !Ref HostedZone
+      RecordSets:
+        - Name: !Join
+            - ''
+            - - !Ref WebsiteDomain
+              - .
+          Type: A
+          ResourceRecords: []
+          AliasTarget:
+            HostedZoneId: !GetAtt
+              - ElasticLoadBalancer
+              - CanonicalHostedZoneNameID
+            DNSName: !GetAtt
+              - ElasticLoadBalancer
+              - DNSName
+    Metadata:
+      'AWS::CloudFormation::Designer':
+        id: 684fc87b-ae2c-4d5f-957c-aee2c14714a7
+Outputs:
+  URL:
+    Description: The URL of the load balancer
+    Value: !Join
+      - ''
+      - - 'http://'
+        - !GetAtt
+          - ElasticLoadBalancer
+          - DNSName
+Metadata:
+  'AWS::CloudFormation::Designer':
+    c1fa8924-93e8-4ec7-8b62-195ce2ae3cf6:
+      size:
+        width: 240
+        height: 240
+      position:
+        x: 360
+        'y': 90
+      z: 1
+      embeds:
+        - 684fc87b-ae2c-4d5f-957c-aee2c14714a7
+    7b3b4a43-5909-485a-a73a-1ce3e749160a:
+      size:
+        width: 60
+        height: 60
+      position:
+        x: -10
+        'y': 460
+      z: 1
+      embeds: []
+    684fc87b-ae2c-4d5f-957c-aee2c14714a7:
+      size:
+        width: 60
+        height: 60
+      position:
+        x: 390
+        'y': 150
+      z: 2
+      parent: c1fa8924-93e8-4ec7-8b62-195ce2ae3cf6
+      embeds: []
+      isrelatedto:
+        - 7b3b4a43-5909-485a-a73a-1ce3e749160a
+    c0744c52-8c26-413c-9090-4a92c5c5a6d8:
+      size:
+        width: 60
+        height: 60
+      position:
+        x: 180
+        'y': 390
+      z: 1
+      embeds: []
+      isrelatedto:
+        - 7b3b4a43-5909-485a-a73a-1ce3e749160a
+    871709db-a124-4a32-847d-8c992bf2d9ef:
+      size:
+        width: 60
+        height: 60
+      position:
+        x: 300
+        'y': 390
+      z: 1
+      embeds: []
+    dfba33f2-da88-49de-a850-3373b5f3c867:
+      size:
+        width: 60
+        height: 60
+      position:
+        x: 420
+        'y': 390
+      z: 1
+      embeds: []
+      isassociatedwith:
+        - 871709db-a124-4a32-847d-8c992bf2d9ef
+    64fa001c-c8df-4c6c-a458-880d0768bb69:
+      size:
+        width: 60
+        height: 60
+      position:
+        x: 540
+        'y': 390
+      z: 1
+      embeds: []
+      isassociatedwith:
+        - 871709db-a124-4a32-847d-8c992bf2d9ef
+    7085b267-31b5-495a-a29c-29c0fefd6fca:
+      size:
+        width: 60
+        height: 60
+      position:
+        x: -60
+        'y': 340
+      z: 1
+      embeds: []
+    0878b998-b92e-44df-bea8-cabc8881aed6:
+      source:
+        id: 7085b267-31b5-495a-a29c-29c0fefd6fca
+      target:
+        id: c0744c52-8c26-413c-9090-4a92c5c5a6d8
+    6e6c394d-9f21-429e-b206-c5e834e3a903:
+      size:
+        width: 240
+        height: 240
+      position:
+        x: 60
+        'y': 90
+      z: 1
+      embeds:
+        - e7a4d31e-6743-4ed1-b296-e7f2f56fa85b
+    e7a4d31e-6743-4ed1-b296-e7f2f56fa85b:
+      size:
+        width: 60
+        height: 60
+      position:
+        x: 90
+        'y': 150
+      z: 2
+      parent: 6e6c394d-9f21-429e-b206-c5e834e3a903
+      embeds: []
+      ismemberof:
+        - 7085b267-31b5-495a-a29c-29c0fefd6fca
+    2f88c666-c5ae-49b2-b3f8-7ec6e1423a5c:
+      size:
+        width: 60
+        height: 60
+      position:
+        x: 180
+        'y': 510
+      z: 1
+      embeds: []
+      ismemberof:
+        - c0744c52-8c26-413c-9090-4a92c5c5a6d8
+      isrelatedto:
+        - dfba33f2-da88-49de-a850-3373b5f3c867
+        - e7a4d31e-6743-4ed1-b296-e7f2f56fa85b
+    a6fd43e6-75c0-47f2-b9ac-109c583874b8:
+      size:
+        width: 60
+        height: 60
+      position:
+        x: 300
+        'y': 510
+      z: 1
+      embeds: []
+      isconnectedto:
+        - 7b3b4a43-5909-485a-a73a-1ce3e749160a
+      isassociatedwith:
+        - 2f88c666-c5ae-49b2-b3f8-7ec6e1423a5c
+    2350f3c9-7f83-4136-ad4d-dde28561b360:
+      size:
+        width: 60
+        height: 60
+      position:
+        x: 420
+        'y': 510
+      z: 1
+      embeds: []
+      isassociatedwith:
+        - a6fd43e6-75c0-47f2-b9ac-109c583874b8
+    2ea882d3-0dd2-4360-b92c-6b6bfee96369:
+      size:
+        width: 60
+        height: 60
+      position:
+        x: 540
+        'y': 510
+      z: 1
+      embeds: []
+      isrelatedto:
+        - 2350f3c9-7f83-4136-ad4d-dde28561b360
+        - a6fd43e6-75c0-47f2-b9ac-109c583874b8
+    6fb5aff2-5d37-4c51-9374-27728ef032ad:
+      size:
+        width: 60
+        height: 60
+      position:
+        x: 660
+        'y': 90
+      z: 1
+      embeds: []
+      isassociatedwith:
+        - a6fd43e6-75c0-47f2-b9ac-109c583874b8
+    98d52891-1ac0-4b2d-bb1a-acbead2c932d:
+      size:
+        width: 60
+        height: 60
+      position:
+        x: 660
+        'y': 210
+      z: 1
+      embeds: []
+      isrelatedto:
+        - 6fb5aff2-5d37-4c51-9374-27728ef032ad
+        - a6fd43e6-75c0-47f2-b9ac-109c583874b8

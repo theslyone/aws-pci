@@ -1,0 +1,1010 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Enterprise Accelerator - Provides nesting for required stacks to deploy
+  a full frapid PCI application with reverse proxy, ELBs, IAM, and other resources
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+    - Label:
+        default: Region Config
+      Parameters:
+      - pRegionAZ1Name
+      - pRegionAZ2Name
+    - Label:
+        default: Network (existing VPC config)
+      Parameters:
+      - pProductionCIDR
+      - pProductionVPC
+      - pDMZSubnetA
+      - pDMZSubnetB
+      - pAppPrivateSubnetA
+      - pAppPrivateSubnetB
+      - pDBPrivateSubnetA
+      - pDBPrivateSubnetB
+    - Label:
+        default: Application Configuration
+      Parameters:
+      - pWebInstanceType
+      - pWebServerAMI
+      - pAppInstanceType
+      - pAppAmi
+    - Label:
+        default: Database Configuration
+      Parameters:
+      - pDBName
+      - pDBUser
+      - pDBPassword
+      - pDBClass
+      - pDBAllocatedStorage
+    - Label:
+        default: AWS Quick Start Configuration
+      Parameters:
+      - QuickStartS3URL
+      - QSS3BucketName
+      - QSS3KeyPrefix
+  Stack:
+    Value: 3
+  VersionDate:
+    Value: 20160510
+  Identifier:
+    Value: template-application
+  Input:
+    Description: VPC, SubnetIDs, S3 bucket names, CIDR blocks, KeyNames, AMIs, DB
+      name and password
+  Output:
+    Description: Outputs ID of all deployed resources
+Parameters:
+  pSecurityAlarmTopic:
+    Description: SNS topic for alarms and notifications
+    Type: String
+    Default: ''
+  pEC2KeyPair:
+    Description: Key Name for Instance
+    Type: String
+    Default: ''
+  pProductionCIDR:
+    Description: Production VPC CIDR
+    Type: String
+  pManagementCIDR:
+    Description: Management VPC CIDR
+    Type: String
+  pProductionVPC:
+    Description: Production VPC
+    Type: AWS::EC2::VPC::Id
+  pBastionSSHCIDR:
+    Description: CIDR block (optional) of Public IPs allowed to access Bastion instance
+      in this deployment
+    Type: String
+    Default: 0.0.0.0/0
+  pDMZSubnetA:
+    Description: DMZ Subnet A
+    Type: AWS::EC2::Subnet::Id
+  pDMZSubnetB:
+    Description: DMZ Subnet B
+    Type: AWS::EC2::Subnet::Id
+  pAppPrivateSubnetA:
+    Description: WebApp Subnet A
+    Type: AWS::EC2::Subnet::Id
+  pAppPrivateSubnetB:
+    Description: WebApp Subnet A
+    Type: AWS::EC2::Subnet::Id
+  pWebInstanceType:
+    Description: Instance type for the webservers
+    Type: String
+  pAppInstanceType:
+    Description: Instance type for the app webservers
+    Type: String
+  pDBPrivateSubnetA:
+    Description: rDBPrivateSubnetA
+    Type: AWS::EC2::Subnet::Id
+  pDBPrivateSubnetB:
+    Description: rDBPrivateSubnetB
+    Type: AWS::EC2::Subnet::Id
+  pRegionAZ1Name:
+    Description: rDBPrivateSubnetB
+    Type: AWS::EC2::AvailabilityZone::Name
+  pRegionAZ2Name:
+    Description: rDBPrivateSubnetB
+    Type: AWS::EC2::AvailabilityZone::Name
+  pWebServerAMI:
+    Description: Which AMI do you want to use as your webserver proxy
+    Type: String
+    Default: none
+  pAppAmi:
+    Description: Which AMI do you want to use as your app webserver
+    Type: String
+    Default: none
+  pDBEngine:
+    Description: The name of the database engine that the DB instance uses
+    Type: String
+  pDBName:
+    Description: Name of RDS Database
+    Type: String
+  pDBUser:
+    Description: Username of DB Instance
+    Type: String
+  pDBPassword:
+    Description: Password of DB Instance
+    NoEcho: true
+    Type: String
+  pDBClass:
+    Description: Instance class of RDS instance
+    Type: String
+  pDBAllocatedStorage:
+    Description: Allocated Storage (in GB) for RDS instance
+    Type: String
+  pEnvironment:
+    Description: Environment type (development, test, or production)
+    Type: String
+    Default: development
+  pSupportsGlacier:
+    Description: Determines whether this region supports Glacier (passed in from main
+      template)
+    Type: String
+    Default: 'true'
+  pBucketRegion:
+    Type: String
+    Default: us-west-2
+    Description: S3 bucket region
+  QSS3BucketName:
+    AllowedPattern: ^[0-9a-zA-Z]+([0-9a-zA-Z-.]*[0-9a-zA-Z])*$
+    ConstraintDescription: Quick Start bucket name can include numbers, lowercase
+      letters, uppercase letters, periods (.), and hyphens (-). It cannot start or
+      end with a hyphen (-).
+    Default: free-bucket
+    Description: S3 bucket name for the Quick Start assets. Quick Start bucket name
+      can include numbers, lowercase letters, uppercase letters, and hyphens (-).
+      It cannot start or end with a hyphen (-).
+    Type: String
+  pBucketAccessKey:
+    Type: String
+    Default: ''
+    Description: S3 bucket access key
+  pBucketSecretKey:
+    Type: String
+    Default: ''
+    Description: S3 bucket secret key
+  QSS3KeyPrefix:
+    AllowedPattern: ^[0-9a-zA-Z-]+(/[0-9a-zA-Z-]+)*$
+    ConstraintDescription: Quick Start key prefix can include numbers, lowercase letters,
+      uppercase letters, hyphens (-), and forward slash (/). It cannot start or end
+      with forward slash (/) because they are automatically appended.
+    Default: v1
+    Description: S3 key prefix for the Quick Start assets. Quick Start key prefix
+      can include numbers, lowercase letters, uppercase letters, hyphens (-), and
+      forward slash (/). It cannot start or end with forward slash (/) because they
+      are automatically appended.
+    Type: String
+  QuickStartS3URL:
+    Description: S3 URL prefix.
+    Default: https://s3.amazonaws.com
+    Type: String
+  pDeploymentPackage:
+    Description: Webserver application deployment package name stored in s3 bucket.
+      This zip package is unzipped to a temp directory on the webserver and all deploy.psi
+      scripts found within are executed to deploy and publish the application to IIS.
+    Default: app
+    Type: String
+  pSysAdminProfile:
+    Description: IAM System admin profile
+    Type: String
+  pSysAdminRole:
+    Description: IAM System admin role
+    Type: String
+Mappings:
+  DBEngineVersionMap:
+    sqlserver-ex:
+      version: 12.0
+      multiaz: false
+      port: 1433
+    sqlserver-web:
+      version: 12.0
+      multiaz: false
+      port: 1433
+    sqlserver-se:
+      version: 12.0
+      multiaz: true
+      port: 1433
+      licenseModel: license-included
+    sqlserver-ee:
+      version: 12.0
+      multiaz: true
+      port: 1433
+    postgres:
+      version: 9.6.2
+      multiaz: true
+      port: 5432,
+      licenseModel: postgresql-license
+  elbMap:
+    us-east-1:
+      ELB: '127311923021'
+    us-east-2:
+      ELB: 033677994240
+    us-west-1:
+      ELB: 027434742980
+    us-west-2:
+      ELB: '797873946194'
+    ca-central-1:
+      ELB: '985666609251'
+    eu-west-1:
+      ELB: '156460612806'
+    eu-west-2:
+      ELB: '652711504416'
+    ap-south-1:
+      ELB: '718504428378'
+    ap-southeast-2:
+      ELB: '783225319266'
+    ap-southeast-1:
+      ELB: '114774131450'
+    ap-northeast-1:
+      ELB: '582318560864'
+    ap-northeast-2:
+      ELB: '600734575887'
+    eu-central-1:
+      ELB: 054676820928
+    sa-east-1:
+      ELB: '507241528517'
+    us-gov-west-1:
+      ELB: 048591011584
+Conditions:
+  cCanAccessAppInstance: !Equals [ !Ref pEnvironment, development ]
+  IsGovCloud: !Equals [!Ref 'AWS::Region', us-gov-west-1]
+  SupportsGlacier: !Equals [!Ref 'pSupportsGlacier', true]
+  IsPostgres: !Equals [!Ref 'pDBEngine', postgres]
+  IsSqlServer: !Not [ !Equals [ !Ref 'pDBEngine', postgres] ]
+  IsDevelopment: !Equals [ !Ref pEnvironment, development ]
+Resources:
+  rS3ELBAccessLogs:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    Properties:
+      AccessControl: Private
+  rS3AccessLogsPolicy:
+    Type: AWS::S3::BucketPolicy
+    DeletionPolicy: Retain
+    Properties:
+      Bucket: !Ref 'rS3ELBAccessLogs'
+      PolicyDocument:
+        Version: '2008-10-17'
+        Statement:
+        - Sid: ELBAccessLogs20130930
+          Effect: Allow
+          Resource: !Sub ['arn:${Endpoint}:s3:::${rS3ELBAccessLogs}/Logs/AWSLogs/${AWS::AccountId}/*',
+            {Endpoint: !If [IsGovCloud, aws-us-gov, aws]}]
+          Principal:
+            AWS: !FindInMap [elbMap, !Ref 'AWS::Region', ELB]
+          Action:
+          - s3:PutObject
+  rSecurityGroupWeb:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for Reverse Proxy in DMZ
+      VpcId: !Ref 'pProductionVPC'
+      SecurityGroupIngress:
+      - IpProtocol: tcp
+        FromPort: 443
+        ToPort: 443
+        CidrIp: 0.0.0.0/0
+      SecurityGroupEgress:
+      - IpProtocol: tcp
+        FromPort: 80
+        ToPort: 80
+        CidrIp: 0.0.0.0/0
+      - IpProtocol: tcp
+        FromPort: 443
+        ToPort: 443
+        CidrIp: 0.0.0.0/0
+      Tags:
+      - Key: Name
+        Value: sg-reverse-proxy-dmz
+      - Key: Environment
+        Value: !Ref 'pEnvironment'
+  rSecurityGroupWebInstance:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for Reverse Proxy Instances in DMZ
+      VpcId: !Ref 'pProductionVPC'
+      SecurityGroupIngress:
+      - IpProtocol: tcp
+        FromPort: 443
+        ToPort: 443
+        CidrIp: !Ref 'pProductionCIDR'
+      - IpProtocol: tcp
+        FromPort: 80
+        ToPort: 80
+        CidrIp: !Ref 'pProductionCIDR'
+      - IpProtocol: tcp
+        FromPort: 22
+        ToPort: 22
+        CidrIp: !Ref 'pManagementCIDR'
+      SecurityGroupEgress:
+      - IpProtocol: tcp
+        FromPort: 80
+        ToPort: 80
+        CidrIp: 0.0.0.0/0
+      - IpProtocol: tcp
+        FromPort: 443
+        ToPort: 443
+        CidrIp: 0.0.0.0/0
+      - IpProtocol: udp
+        FromPort: 123
+        ToPort: 123
+        CidrIp: !Ref 'pProductionCIDR'
+      Tags:
+      - Key: Name
+        Value: sg-reverse-proxy-dmz-instances
+      - Key: Environment
+        Value: !Ref 'pEnvironment'
+  rSecurityGroupApp:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for Appservers ELB
+      VpcId: !Ref 'pProductionVPC'
+      SecurityGroupIngress:
+      - IpProtocol: tcp
+        FromPort: 443
+        ToPort: 443
+        CidrIp: !Ref 'pProductionCIDR'
+      SecurityGroupEgress:
+      - IpProtocol: tcp
+        FromPort: 443
+        ToPort: 443
+        CidrIp: 0.0.0.0/0
+      - IpProtocol: tcp
+        FromPort: 80
+        ToPort: 80
+        CidrIp: 0.0.0.0/0
+      Tags:
+      - Key: Name
+        Value: sg-app-server-elb
+      - Key: Environment
+        Value: !Ref 'pEnvironment'
+  rSecurityGroupAppInstance:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for Appserver Instances
+      VpcId: !Ref 'pProductionVPC'
+      SecurityGroupIngress:
+      - IpProtocol: tcp
+        FromPort: 443
+        ToPort: 443
+        CidrIp: !Ref 'pProductionCIDR'
+      - IpProtocol: tcp
+        FromPort: 80
+        ToPort: 80
+        CidrIp: !Ref 'pProductionCIDR'
+      - IpProtocol: tcp
+        FromPort: 22
+        ToPort: 22
+        CidrIp: !Ref 'pManagementCIDR'
+      - IpProtocol: tcp
+        FromPort: '3389'
+        ToPort: '3389'
+        CidrIp: 0.0.0.0/0
+      SecurityGroupEgress:
+      - IpProtocol: tcp
+        FromPort: 80
+        ToPort: 80
+        CidrIp: 0.0.0.0/0
+      - IpProtocol: tcp
+        FromPort: 443
+        ToPort: 443
+        CidrIp: 0.0.0.0/0
+      - IpProtocol: udp
+        FromPort: 123
+        ToPort: 123
+        CidrIp: !Ref 'pProductionCIDR'
+      - IpProtocol: tcp
+        FromPort: 5432
+        ToPort: 5432
+        CidrIp: !Ref 'pProductionCIDR'
+      Tags:
+      - Key: Name
+        Value: sg-app-server-elb-instances
+      - Key: Environment
+        Value: !Ref 'pEnvironment'
+  rSecurityGroupRDS:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Port 5432 database for access
+      VpcId: !Ref 'pProductionVPC'
+      SecurityGroupIngress:
+      - IpProtocol: tcp
+        FromPort: 5432
+        ToPort: 5432
+        SourceSecurityGroupId: !Ref 'rSecurityGroupAppInstance'
+      Tags:
+      - Key: Name
+        Value: sg-database-access
+      - Key: Environment
+        Value: !Ref 'pEnvironment'
+  rWebContentBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      AccessControl: Private
+      LifecycleConfiguration:
+        Rules:
+        - Id: Transition90daysRetain7yrs
+          Status: Enabled
+          ExpirationInDays: 2555
+          Transition:
+            TransitionInDays: 90
+            StorageClass: !If [SupportsGlacier, GLACIER, STANDARD_IA]
+      VersioningConfiguration:
+        Status: Enabled
+    DeletionPolicy: Retain
+  rWebContentS3Policy:
+    Type: AWS::S3::BucketPolicy
+    DependsOn: rWebContentBucket
+    Properties:
+      Bucket: !Ref 'rWebContentBucket'
+      PolicyDocument:
+        Statement:
+        - Sid: EnforceSecureTransport
+          Action: s3:*
+          Effect: Deny
+          Principal: '*'
+          Resource: !Sub ['arn:${Endpoint}:s3:::${rWebContentBucket}', {Endpoint: !If [
+                IsGovCloud, aws-us-gov, aws]}]
+          Condition:
+            Bool:
+              aws:SecureTransport: 'false'
+        - Sid: EnforceEncryptionOnPut
+          Effect: Deny
+          Principal: '*'
+          Action: s3:PutObject
+          Resource: !Sub ['arn:${Endpoint}:s3:::${rWebContentBucket}/*', {Endpoint: !If [
+                IsGovCloud, aws-us-gov, aws]}]
+          Condition:
+            StringNotEquals:
+              s3:x-amz-server-side-encryption: AES256
+  rDBSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: RDS Subnet Group
+      SubnetIds:
+      - !Ref 'pDBPrivateSubnetA'
+      - !Ref 'pDBPrivateSubnetB'
+  rELBApp:
+    Type: AWS::ElasticLoadBalancing::LoadBalancer
+    DependsOn:
+    - rS3ELBAccessLogs
+    - rSecurityGroupApp
+    - rS3AccessLogsPolicy
+    Properties:
+      Subnets:
+      - !Ref 'pAppPrivateSubnetA'
+      - !Ref 'pAppPrivateSubnetB'
+      HealthCheck:
+        HealthyThreshold: 2
+        Interval: 15
+        Target: TCP:80
+        Timeout: 5
+        UnhealthyThreshold: 3
+      AccessLoggingPolicy:
+        S3BucketName: !Ref 'rS3ELBAccessLogs'
+        S3BucketPrefix: Logs
+        Enabled: true
+        EmitInterval: 60
+      SecurityGroups:
+      - !Ref 'rSecurityGroupApp'
+      Listeners:
+      - InstancePort: 80
+        LoadBalancerPort: 80
+        Protocol: HTTP
+        InstanceProtocol: HTTP
+      Scheme: internal
+      Tags:
+      - Key: Name
+        Value: ProxyELB
+      - Key: Environment
+        Value: !Ref 'pEnvironment'
+  rELBWeb:
+    Type: AWS::ElasticLoadBalancing::LoadBalancer
+    DependsOn:
+    - rS3ELBAccessLogs
+    - rSecurityGroupWeb
+    - rS3AccessLogsPolicy
+    Properties:
+      Subnets:
+      - !Ref 'pDMZSubnetA'
+      - !Ref 'pDMZSubnetB'
+      HealthCheck:
+        HealthyThreshold: 2
+        Interval: 30
+        Target: TCP:80
+        Timeout: 5
+        UnhealthyThreshold: 5
+      AccessLoggingPolicy:
+        S3BucketName: !Ref 'rS3ELBAccessLogs'
+        S3BucketPrefix: Logs
+        Enabled: true
+        EmitInterval: 60
+      SecurityGroups:
+      - !Ref 'rSecurityGroupWeb'
+      Listeners:
+      - InstancePort: 80
+        LoadBalancerPort: 80
+        Protocol: HTTP
+        InstanceProtocol: HTTP
+      Tags:
+      - Key: Name
+        Value: Proxy ELB
+      - Key: Environment
+        Value: !Ref 'pEnvironment'
+
+  rEIPApp:
+    Type: AWS::EC2::EIP
+    Condition: cCanAccessAppInstance
+    Properties:
+      Domain: vpc
+  rAssociaterEIPApp:
+    Type: AWS::EC2::EIPAssociation
+    Condition: cCanAccessAppInstance
+    Properties:
+      AllocationId: !GetAtt rEIPApp.AllocationId
+      NetworkInterfaceId: !Ref rENIApp
+  rENIApp:
+    Condition: cCanAccessAppInstance
+    Type: AWS::EC2::NetworkInterface
+    Properties:
+      SubnetId: !Ref pDMZSubnetA
+      GroupSet:
+        - !Ref rSecurityGroupAppInstance
+      Description: Interface for App device
+      Tags:
+        - Key: Network
+          Value: AppDevice
+
+  rRDSInstance:
+    Type: AWS::RDS::DBInstance
+    DependsOn:
+    - rDBSubnetGroup
+    - rSecurityGroupRDS
+    Properties:
+      AllocatedStorage: !Ref 'pDBAllocatedStorage'
+      DBInstanceClass: !Ref 'pDBClass'
+      Engine: !Ref 'pDBEngine'
+      EngineVersion: !If [ IsSqlServer, "12.0.0", "9.6.2" ]
+      StorageEncrypted: true
+      LicenseModel: !If [ IsSqlServer, "license-included", "postgresql-license" ]
+      DBName: !If [ IsSqlServer, !Ref "AWS::NoValue", !Ref pDBName ]
+      MasterUsername: !Ref 'pDBUser'
+      MasterUserPassword: !Ref 'pDBPassword'
+      MultiAZ: !If [ IsDevelopment, false, true ]
+      Port: !If [ IsSqlServer, 1433, 5432 ]
+      PreferredBackupWindow: 08:00-10:00
+      PreferredMaintenanceWindow: wed:06:46-wed:07:16
+      BackupRetentionPeriod: '7'
+      AllowMajorVersionUpgrade: false
+      AutoMinorVersionUpgrade: true
+      OptionGroupName: !If [ IsSqlServer, !Ref 'rRDSOptionGroup', !Ref "AWS::NoValue" ]
+      VPCSecurityGroups:
+      - !Ref 'rSecurityGroupRDS'
+      DBSubnetGroupName: !Ref 'rDBSubnetGroup'
+    DeletionPolicy: Snapshot
+  rRDSOptionGroup:
+    Type: AWS::RDS::OptionGroup
+    Condition: IsSqlServer
+    Properties:
+      EngineName: !Ref 'pDBEngine'
+      MajorEngineVersion: '12.00'
+      OptionGroupDescription: SqlServer Mirroring Option Group
+      OptionConfigurations:
+      - OptionName: Mirroring
+  rAutoScalingConfigWeb:
+    Type: AWS::AutoScaling::LaunchConfiguration
+    DependsOn:
+    - rELBApp
+    - rAutoScalingGroupApp
+    Metadata:
+      AWS::CloudFormation::Init:
+        config:
+          packages:
+            yum:
+              nginx: []
+              java-1.6.0-openjdk-devel: []
+              git: []
+          files:
+            /tmp/nginx/default.conf:
+              content: !Sub |
+                server {
+                  listen 80;
+                  charset utf-8;
+                  location / {
+                    resolver xxxxx;
+                    set $elb 'https://${rELBApp.DNSName}';
+                    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                    proxy_set_header Host $http_host;
+                    proxy_redirect off;
+                    proxy_pass $elb;
+                  }
+                  location = /nginx.html {
+                    root   /usr/share/nginx/html;
+                    index  index.php index.html index.htm;
+                  }
+                  error_page 404 /404.html;
+                  location = /404.html {
+                    root   /usr/share/nginx/html;
+                  }
+                }
+              mode: '000755'
+              owner: root
+              group: root
+          commands:
+            01-nginx-setup:
+              command: '#!/bin/bash
+
+                ## Nginx setup
+
+                sleep 5
+
+                echo ''Replace resolver placeholder with /etc/resolv.conf nameservers''
+
+                sed -i "s/xxxxx/$(grep ^nameserver /etc/resolv.conf | sed ''s/^nameserver//''
+                | tr -d ''\n'')/" /tmp/nginx/default.conf
+
+                cp /tmp/nginx/default.conf /etc/nginx/conf.d/default.conf
+
+                service nginx stop
+
+                sed -i ''/default_server;/d'' /etc/nginx/nginx.conf
+
+                sleep 10
+
+                service nginx restart
+
+                '
+          services:
+            sysvinit:
+              nginx:
+                enabled: true
+                ensureRunning: true
+                files:
+                - /etc/nginx/conf.d/default.conf
+    Properties:
+      AssociatePublicIpAddress: true
+      ImageId: !Ref 'pWebServerAMI'
+      InstanceType: !Ref 'pWebInstanceType'
+      KeyName: !Ref 'pEC2KeyPair'
+      SecurityGroups:
+      - !Ref 'rSecurityGroupWebInstance'
+      UserData: !Base64
+        Fn::Sub: '#!/bin/bash
+
+          yum update -y
+
+          /opt/aws/bin/cfn-init -v --stack ${AWS::StackName} --resource rAutoScalingConfigWeb
+          --region ${AWS::Region}
+
+
+          ## Nginx setup
+
+          sleep 5
+
+          cp /tmp/nginx/default.conf /etc/nginx/conf.d/default.conf
+
+          service nginx stop
+
+          sed -i ''/default_server;/d'' /etc/nginx/nginx.conf
+
+          sleep 10
+
+          service nginx restart
+
+          '
+  rAutoScalingGroupWeb:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    DependsOn: rAutoScalingConfigWeb
+    Properties:
+      AvailabilityZones:
+      - !Ref 'pRegionAZ1Name'
+      - !Ref 'pRegionAZ2Name'
+      VPCZoneIdentifier:
+      - !Ref 'pDMZSubnetA'
+      - !Ref 'pDMZSubnetB'
+      LaunchConfigurationName: !Ref 'rAutoScalingConfigWeb'
+      MinSize: 1
+      MaxSize: 2
+      LoadBalancerNames:
+      - !Ref 'rELBWeb'
+      HealthCheckType: ELB
+      HealthCheckGracePeriod: 300
+      Tags:
+      - Key: Name
+        Value: Proxy Server
+        PropagateAtLaunch: true
+      - Key: Environment
+        Value: !Ref 'pEnvironment'
+        PropagateAtLaunch: true
+  rAutoScalingUpWeb:
+    Type: AWS::AutoScaling::ScalingPolicy
+    Properties:
+      AdjustmentType: ChangeInCapacity
+      AutoScalingGroupName: !Ref 'rAutoScalingGroupWeb'
+      Cooldown: 500
+      ScalingAdjustment: 1
+  rAutoScalingDownWeb:
+    Type: AWS::AutoScaling::ScalingPolicy
+    Properties:
+      AdjustmentType: ChangeInCapacity
+      AutoScalingGroupName: !Ref 'rAutoScalingGroupWeb'
+      Cooldown: 500
+      ScalingAdjustment: -1
+  rCWAlarmHighCPUWeb:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      EvaluationPeriods: 1
+      Statistic: Average
+      Threshold: 50
+      AlarmDescription: Alarm if CPU too high or metric disappears indicating instance
+        is down
+      Period: 60
+      AlarmActions:
+      - !Ref 'rAutoScalingUpWeb'
+      Namespace: AWS/EC2
+      Dimensions:
+      - Name: AutoScalingGroupName
+        Value: !Ref 'rAutoScalingGroupWeb'
+      ComparisonOperator: GreaterThanThreshold
+      MetricName: WebServerCpuHighUtilization
+  rCWAlarmLowCPUWeb:
+    Type: AWS::CloudWatch::Alarm
+    DependsOn: rAutoScalingGroupWeb
+    Properties:
+      EvaluationPeriods: 1
+      Statistic: Average
+      Threshold: 10
+      AlarmDescription: Alarm if CPU too low, remove a web server
+      Period: 60
+      AlarmActions:
+      - !Ref 'rAutoScalingDownWeb'
+      Namespace: AWS/EC2
+      Dimensions:
+      - Name: AutoScalingGroupName
+        Value: !Ref 'rAutoScalingGroupWeb'
+      ComparisonOperator: LessThanThreshold
+      MetricName: WebServerCpuLowUtilization
+  rAutoScalingConfigApp:
+    Type: AWS::AutoScaling::LaunchConfiguration
+    DependsOn:
+    - rRDSInstance
+    Metadata:
+      Version: !Ref 'QSS3KeyPrefix'
+      AWS::CloudFormation::Authentication:
+        default:
+          type: s3
+          buckets:
+          - !Ref 'QSS3BucketName'
+          roleName: !Ref 'pSysAdminRole'
+      AWS::CloudFormation::Init:
+        config:
+          sources:
+            c:\inetpub\deploy: !Sub 'https://s3-${pBucketRegion}.amazonaws.com/${QSS3BucketName}/${QSS3KeyPrefix}/${pDeploymentPackage}.zip'
+    Properties:
+      ImageId: !Ref 'pAppAmi'
+      InstanceType: !Ref 'pAppInstanceType'
+      KeyName: !Ref 'pEC2KeyPair'
+      SecurityGroups:
+      - !Ref 'rSecurityGroupAppInstance'
+      IamInstanceProfile: !Ref 'pSysAdminProfile'
+      AssociatePublicIpAddress: !If [ cCanAccessAppInstance, true, false ]
+      UserData: !Base64
+        'Fn::Sub': >
+          <script>
+          cfn-init.exe -v -s ${AWS::StackName} -r rAutoScalingConfigWeb --region ${AWS::Region}
+          </script>
+
+          <powershell>
+          # Run all deploy.ps1 files
+          $executionPolicy = Get-ExecutionPolicy
+          Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+          Get-ChildItem c:\inetpub\deploy -recurse -force | ? {$_.name -eq "deploy.ps1"} |
+              ForEach-Object {
+                Invoke-Expression ($_.FullName + '
+                  -version ''${QSS3KeyPrefix}''
+                  -dbServer ''${rRDSInstance.Endpoint.Address}''
+                  -dbUsername ''${pDBUser}''
+                  -dbPassword ''${pDBPassword}''
+                  -bucketRegion ''${pBucketRegion}''
+                  -bucketName ''${QSS3BucketName}''
+                  -awsAccessKey ''${pBucketAccessKey}''
+                  -awsSecretKey ''${pBucketSecretKey}''')
+              }
+          Set-ExecutionPolicy -Scope Process -ExecutionPolicy $executionPolicy
+          # Clean up the deploy directory
+          Get-ChildItem c:\\inetpub\\deploy -recurse | Remove-Item -force -Recurse
+          </powershell>
+  rAutoScalingGroupApp:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    DependsOn: rAutoScalingConfigApp
+    Properties:
+      AvailabilityZones:
+      - !Ref 'pRegionAZ1Name'
+      - !Ref 'pRegionAZ2Name'
+      VPCZoneIdentifier:
+      - !Ref 'pAppPrivateSubnetA'
+      - !Ref 'pAppPrivateSubnetB'
+      LaunchConfigurationName: !Ref 'rAutoScalingConfigApp'
+      MinSize: 1
+      MaxSize: 2
+      LoadBalancerNames:
+      - !Ref 'rELBApp'
+      HealthCheckType: ELB
+      HealthCheckGracePeriod: 300
+      Tags:
+      - Key: Name
+        Value: AppServer
+        PropagateAtLaunch: true
+      - Key: Environment
+        Value: !Ref 'pEnvironment'
+        PropagateAtLaunch: true
+  rAutoScalingUpApp:
+    Type: AWS::AutoScaling::ScalingPolicy
+    Properties:
+      AdjustmentType: ChangeInCapacity
+      AutoScalingGroupName: !Ref 'rAutoScalingGroupApp'
+      Cooldown: 1
+      ScalingAdjustment: 1
+  rAutoScalingDownApp:
+    Type: AWS::AutoScaling::ScalingPolicy
+    Properties:
+      AdjustmentType: ChangeInCapacity
+      AutoScalingGroupName: !Ref 'rAutoScalingGroupApp'
+      Cooldown: 1
+      ScalingAdjustment: -1
+  rCWAlarmHighCPUApp:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      EvaluationPeriods: 1
+      Statistic: Average
+      Threshold: 50
+      AlarmDescription: Alarm if CPU too high or metric disappears indicating instance
+        is down
+      Period: 60
+      AlarmActions:
+      - !Ref 'rAutoScalingUpApp'
+      Namespace: AWS/EC2
+      Dimensions:
+      - Name: AutoScalingGroupName
+        Value: !Ref 'rAutoScalingGroupApp'
+      ComparisonOperator: GreaterThanThreshold
+      MetricName: AppServerCpuHighUtilization
+  rCWAlarmLowCPUApp:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      EvaluationPeriods: 1
+      Statistic: Average
+      Threshold: 10
+      AlarmDescription: Alarm if CPU too low, remove an app server
+      Period: 60
+      AlarmActions:
+      - !Ref 'rAutoScalingDownApp'
+      Namespace: AWS/EC2
+      Dimensions:
+      - Name: AutoScalingGroupName
+        Value: !Ref 'rAutoScalingGroupApp'
+      ComparisonOperator: LessThanThreshold
+      MetricName: AppServerCpuLowUtilization
+  rPostProcInstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service:
+            - ec2.amazonaws.com
+          Action:
+          - sts:AssumeRole
+      Path: /
+      Policies:
+      - PolicyName: PostProcPermissions
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Sid: UploadServerCertificate
+            Effect: Allow
+            Action:
+            - iam:ListServerCertificates
+            - iam:UploadServerCertificate
+            Resource:
+            - '*'
+          - Sid: CreateLoadBalancerListener
+            Effect: Allow
+            Action:
+            - elasticloadbalancing:CreateLoadBalancerListeners
+            Resource:
+            - '*'
+          - Sid: PublishNotificationTopic
+            Effect: Allow
+            Action:
+            - sns:Publish
+            Resource:
+            - !Ref 'pSecurityAlarmTopic'
+          - Sid: SelfDestruct
+            Effect: Allow
+            Action:
+            - ec2:TerminateInstances
+            Resource:
+            - '*'
+  rPostProcInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Path: /
+      Roles:
+      - !Ref 'rPostProcInstanceRole'
+  rPostProcInstance:
+    Type: AWS::EC2::Instance
+    DependsOn:
+    - rAutoScalingGroupApp
+    - rAutoScalingGroupWeb
+    Properties:
+      ImageId: !Ref 'pWebServerAMI'
+      InstanceType: !Ref 'pAppInstanceType'
+      IamInstanceProfile: !Ref 'rPostProcInstanceProfile'
+      SubnetId: !Ref 'pAppPrivateSubnetA'
+      SecurityGroupIds:
+      - !Ref 'rSecurityGroupAppInstance'
+      UserData: !Base64
+        'Fn::Sub': |
+          #!/bin/bash -xe
+
+          echo Configure the region, necessary especially for GovCloud
+          aws configure set region ${AWS::Region}
+
+          echo Determine whether a certificate needs to be generated
+          cert_arn=$(aws iam list-server-certificates --query 'ServerCertificateMetadataList[?ServerCertificateName==`non-production-testing-server-cert`].Arn' --output text)
+          if [[ $(echo "$cert_arn" | grep "non-production-testing-server-cert") != *"non-production-testing-server-cert"* ]]; then
+          echo *** Beginnning ELB HTTPS configuration ***
+          echo Generating private key...
+          sudo openssl genrsa -out /tmp/my-private-key.pem 2048
+          echo Creating CSR
+          sudo openssl req -sha256 -new -key /tmp/my-private-key.pem -out /tmp/csr.pem -subj "/C=US/ST=Washington/L=Seattle/O=NonProductionTestCert/CN=NonProductionTestCert"
+          echo Self-signing certificate...
+          sudo openssl x509 -req -days 365 -in /tmp/csr.pem -signkey /tmp/my-private-key.pem -out /tmp/my-certificate.pem
+          sudo openssl rsa -in /tmp/my-private-key.pem -outform PEM
+          echo Converting private key...
+          sudo openssl x509 -inform PEM -in /tmp/my-certificate.pem
+          echo Uploading key to AWS IAM and saving ARN to environment variable...
+          cert_arn=$(aws iam upload-server-certificate --server-certificate-name non-production-testing-server-cert --query 'ServerCertificateMetadata.Arn' --output text --certificate-body file:///tmp/my-certificate.pem --private-key file:///tmp/my-private-key.pem)
+          echo Sleeping so IAM can propogate the certificate...
+          sleep 10
+          echo Removing key files...
+          sudo rm /tmp/*.pem
+          fi
+          echo Creating ELB HTTPS listener using the cert stored in the environment variable...
+          aws elb create-load-balancer-listeners --load-balancer-name ${rELBWeb} --listeners "Protocol=HTTPS,LoadBalancerPort=443,InstanceProtocol=HTTP,InstancePort=80,SSLCertificateId=$cert_arn" --region ${AWS::Region}
+          aws elb create-load-balancer-listeners --load-balancer-name ${rELBApp} --listeners "Protocol=HTTPS,LoadBalancerPort=443,InstanceProtocol=HTTP,InstancePort=80,SSLCertificateId=$cert_arn" --region ${AWS::Region}
+          echo Send notification message...
+          aws sns publish --topic-arn ${pSecurityAlarmTopic} \
+            --subject "CloudFormation successfully launched ${AWS::StackName}" \
+            --message "What now? Click here for more information: https://${rELBWeb.DNSName}/landing.html. Please note that the application server might be finishing up its initialization. If the link doesn't respond right away, please try it again in few minutes. This page resides on an application server in your new environment." \
+            --region ${AWS::Region}
+
+          echo Sleeping for 2 minutes to allow CloudFormation to catch up
+          sleep 120
+
+          echo Self-destruct!
+          aws ec2 terminate-instances --instance-id $(curl -s http://169.254.169.254/latest/meta-data/instance-id) --region ${AWS::Region}
+          echo *** ELB HTTPS configuration complete ***
+      Tags:
+      - Key: Name
+        Value: PostProcessor
+Outputs:
+  WebsiteURL:
+    Value: !Sub 'https://${rELBWeb.DNSName}'
+    Description: Landing Page
+  InstallURL:
+    Value: !Sub 'https://${rELBWeb.DNSName}/install'
+    Description: Frapid Website
+  rSecurityGroupWeb:
+    Value: !Ref 'rSecurityGroupWeb'
+  rSecurityGroupApp:
+    Value: !Ref 'rSecurityGroupApp'
+  rSecurityGroupRDS:
+    Value: !Ref 'rSecurityGroupRDS'
+  Help:
+    Description: For assistance or questions regarding this quickstart please email
+      compliance-accelerator@amazon.com
+    Value: ''

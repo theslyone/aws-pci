@@ -1,15 +1,14 @@
 ---
 AWSTemplateFormatVersion: 2010-09-09
 Description: Enterprise Accelerator - Provides nesting for required stacks to deploy
-  a full frapid PCI application with reverse proxy, ELBs, IAM, and other resources
+  a full sample web application with reverse proxy, ELBs, IAM, and other resources
+  (for demonstration/POC/testing)
 Metadata:
   AWS::CloudFormation::Interface:
     ParameterGroups:
     - Label:
         default: 'Please provide the following parameter values:'
       Parameters:
-      - pDBName
-      - pDBUser
       - pDBPassword
       - pNotifyEmail
       - pEC2KeyPairBastion
@@ -23,10 +22,6 @@ Metadata:
       - QSS3BucketName
       - QSS3KeyPrefix
     ParameterLabels:
-      pDBName:
-        default: Database Name
-      pDBUser:
-        default: Database User
       pDBPassword:
         default: Database Password
       pNotifyEmail:
@@ -58,31 +53,6 @@ Metadata:
   Output:
     Description: N/A
 Parameters:
-  pDBEngine:
-    Description: The name of the database engine that the DB instance uses. Choose sqlserver-se (Sql Server Standard) or sqlserver-ee if you want a multi-az deployment.
-    Type: String
-    Default: sqlserver-ex
-    AllowedValues:
-      - sqlserver-ex
-      - sqlserver-web
-      - sqlserver-se
-      - sqlserver-ee
-    ConstraintDescription : Must be a valid database engine type.
-  pDBName:
-    Description: The name of the database
-    NoEcho: true
-    Type: String
-    MinLength: 1
-    MaxLength: 30
-    Default: testDB
-    AllowedPattern: '[a-z_]*'
-    ConstraintDescription: Must be lowercase and _ delimited based on domain name,
-      between 1 and 30 characters
-  pDBUser:
-    Description: The name of the database
-    NoEcho: true
-    Type: String
-    Default: testuserdb
   pDBPassword:
     Description: Mixed alphanumeric and must be between 8 and 28 characters and contain
       at least one capital letter
@@ -97,7 +67,7 @@ Parameters:
     Description: Notification email address for security events (you will receive
       a confirmation email)
     Type: String
-    Default: use.freebe@gmail.com
+    Default: distlist@example.org
   pEC2KeyPairBastion:
     Description: The SSH key pair in your account to use for the bastion host login
     Type: AWS::EC2::KeyPair::KeyName
@@ -419,6 +389,106 @@ Resources:
           - QuickStartS3URL
         QSS3BucketName: !Ref QSS3BucketName
         QSS3KeyPrefix: !Ref QSS3KeyPrefix
+  ManagementVpcTemplate:
+    Type: AWS::CloudFormation::Stack
+    DependsOn: ProductionVpcTemplate
+    Properties:
+      TemplateURL:
+        !Sub
+        - ${QuickStartS3URL}/${QSS3BucketName}/${QSS3KeyPrefix}/submodules/templates/vpc-management.template
+        - QuickStartS3URL:
+            !FindInMap
+            - AWSInfoRegionMap
+            - !Ref AWS::Region
+            - QuickStartS3URL
+      TimeoutInMinutes: 20
+      Parameters:
+        pProductionVPC:
+          !GetAtt
+          - ProductionVpcTemplate
+          - Outputs.rVPCProduction
+        pRouteTableProdPrivate:
+          !GetAtt
+          - ProductionVpcTemplate
+          - Outputs.rRouteTableProdPrivate
+        pRouteTableProdPublic:
+          !GetAtt
+          - ProductionVpcTemplate
+          - Outputs.rRouteTableProdPublic
+        pProductionCIDR: 10.100.0.0/16
+        pBastionSSHCIDR: 0.0.0.0/0
+        pManagementCIDR: 10.10.0.0/16
+        pManagementDMZSubnetACIDR: 10.10.1.0/24
+        pManagementDMZSubnetBCIDR: 10.10.2.0/24
+        pManagementPrivateSubnetACIDR: 10.10.20.0/24
+        pManagementPrivateSubnetBCIDR: 10.10.30.0/24
+        pManagementVPCName: Management VPC
+        pEC2KeyPairBastion: !Ref pEC2KeyPairBastion
+        pEC2KeyPair: !Ref pEC2KeyPair
+        pVPCTenancy: !Ref pVPCTenancy
+        pBastionAmi:
+          !FindInMap
+          - AWSAMIRegionMap
+          - !Ref AWS::Region
+          - AMZNLINUXHVM
+        pRegionAZ1Name: !Ref pAvailabilityZoneA
+        pRegionAZ2Name: !Ref pAvailabilityZoneB
+        pEnvironment:
+          !FindInMap
+          - CustomVariables
+          - vResourceEnvironmentTagValue
+          - Value
+        pBastionInstanceType:
+          !If
+          - LaunchAsDedicatedInstance
+          - m4.large
+          - t2.small
+        pSupportsNatGateway:
+          !FindInMap
+          - RegionServiceSupport
+          - !Ref AWS::Region
+          - NatGateway
+        pNatAmi:
+          !FindInMap
+          - AWSAMIRegionMap
+          - !Ref AWS::Region
+          - AMZNLINUXHVM
+        pNatInstanceType:
+          !FindInMap
+          - AWSAMIRegionMap
+          - !Ref AWS::Region
+          - InstanceType
+        QuickStartS3URL:
+          !FindInMap
+          - AWSInfoRegionMap
+          - !Ref AWS::Region
+          - QuickStartS3URL
+        QSS3BucketName: !Ref QSS3BucketName
+        QSS3KeyPrefix: !Ref QSS3KeyPrefix
+  ConfigRulesTemplate:
+    Type: AWS::CloudFormation::Stack
+    Condition: LoadConfigRulesTemplate
+    DependsOn:
+    - IamTemplate
+    - ProductionVpcTemplate
+    - ManagementVpcTemplate
+    - LoggingTemplate
+    Properties:
+      TemplateURL:
+        !Sub
+        - ${QuickStartS3URL}/${QSS3BucketName}/${QSS3KeyPrefix}/submodules/templates/config-rules.template
+        - QuickStartS3URL:
+            !FindInMap
+            - AWSInfoRegionMap
+            - !Ref AWS::Region
+            - QuickStartS3URL
+      TimeoutInMinutes: 20
+      Parameters:
+        pRequiredTagKey:
+          !FindInMap
+          - CustomVariables
+          - vResourceEnvironmentTagKey
+          - Value
   ApplicationTemplate:
     Type: AWS::CloudFormation::Stack
     DependsOn: ProductionVpcTemplate
@@ -490,9 +560,8 @@ Resources:
           - AWSAMIRegionMap
           - !Ref AWS::Region
           - AMZNLINUXHVM
-        pDBEngine: !Ref pDBEngine
-        pDBUser: !Ref pDBUser
-        pDBName: !Ref pDBName
+        pDBUser: testuserdb
+        pDBName: testDB
         pDBPassword: !Ref pDBPassword
         pDBClass:
           !FindInMap
@@ -523,6 +592,12 @@ Outputs:
     Value: Standard Multi-Tier Web Application
   TemplateVersion:
     Value: 2.0
+  BastionIP:
+    Description: Use this IP via SSH to connect to Bastion Instance
+    Value:
+      !GetAtt
+      - ManagementVpcTemplate
+      - Outputs.rBastionInstanceIP
   LandingPageURL:
     Value:
       !GetAtt

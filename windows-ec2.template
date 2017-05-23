@@ -1,0 +1,257 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: This template creates a single server installation of Microsoft Windows.
+Parameters:
+  KeyName:
+    Description: Name of an existing EC2 KeyPair
+    Type: 'AWS::EC2::KeyPair::KeyName'
+    ConstraintDescription: must be the name of an existing EC2 KeyPair.
+  InstanceType:
+    Description: Amazon EC2 instance type
+    Type: String
+    Default: m4.large
+    AllowedValues:
+      - t1.micro
+      - t2.micro
+      - t2.small
+      - t2.medium
+      - m1.small
+      - m1.medium
+      - m1.large
+      - m1.xlarge
+      - m2.xlarge
+      - m2.2xlarge
+      - m2.4xlarge
+      - m3.medium
+      - m3.large
+      - m3.xlarge
+      - m3.2xlarge
+      - m4.large
+      - m4.xlarge
+      - m4.2xlarge
+      - m4.4xlarge
+      - m4.10xlarge
+      - c1.medium
+      - c1.xlarge
+      - c3.large
+      - c3.xlarge
+      - c3.2xlarge
+      - c3.4xlarge
+      - c3.8xlarge
+      - c4.large
+      - c4.xlarge
+      - c4.2xlarge
+      - c4.4xlarge
+      - c4.8xlarge
+      - g2.2xlarge
+      - r3.large
+      - r3.xlarge
+      - r3.2xlarge
+      - r3.4xlarge
+      - r3.8xlarge
+      - i2.xlarge
+      - i2.2xlarge
+      - i2.4xlarge
+      - i2.8xlarge
+      - d2.xlarge
+      - d2.2xlarge
+      - d2.4xlarge
+      - d2.8xlarge
+      - hi1.4xlarge
+      - hs1.8xlarge
+      - cr1.8xlarge
+      - cc2.8xlarge
+      - cg1.4xlarge
+    ConstraintDescription: must be a valid EC2 instance type.
+  SourceCidrForRDP:
+    Description: >-
+      IP Cidr from which you are likely to RDP into the instances. You can add
+      rules later by modifying the created security groups e.g. 54.32.98.160/32
+    Type: String
+    MinLength: '9'
+    MaxLength: '18'
+    Default: 0.0.0.0/0
+    AllowedPattern: '^([0-9]+\.){3}[0-9]+\/[0-9]+$'
+Mappings:
+  AWSRegion2AMI:
+    us-east-1:
+      Windows2008r2: ami-98a9378e
+      Windows2012r2: ami-e659c7f0
+    us-west-2:
+      Windows2008r2: ami-06d34c66
+      Windows2012r2: ami-2ad04f4a
+    us-west-1:
+      Windows2008r2: ami-c8f1d5a8
+      Windows2012r2: ami-ccf2d6ac
+    eu-west-1:
+      Windows2008r2: ami-22a0a644
+      Windows2012r2: ami-58a1a73e
+    eu-west-2:
+      Windows2008r2: ami-13faee77
+      Windows2012r2: ami-22feea46
+    eu-central-1:
+      Windows2008r2: ami-ce6cb1a1
+      Windows2012r2: ami-8f6fb2e0
+    ap-northeast-1:
+      Windows2008r2: ami-95f7dff2
+      Windows2012r2: ami-51c8e036
+    ap-northeast-2:
+      Windows2008r2: ami-6c528002
+      Windows2012r2: ami-06528068
+    ap-southeast-1:
+      Windows2008r2: ami-7d41f91e
+      Windows2012r2: ami-a843fbcb
+    ap-southeast-2:
+      Windows2008r2: ami-b6525ad5
+      Windows2012r2: ami-72525a11
+    ap-south-1:
+      Windows2008r2: ami-da0e7cb5
+      Windows2012r2: ami-3d0e7c52
+    us-east-2:
+      Windows2008r2: ami-964760f3
+      Windows2012r2: ami-b5785fd0
+    ca-central-1:
+      Windows2008r2: ami-1dbd0179
+      Windows2012r2: ami-53c37f37
+    sa-east-1:
+      Windows2008r2: ami-fd533e91
+      Windows2012r2: ami-64afc208
+    cn-north-1:
+      Windows2008r2: ami-3c1bcd51
+      Windows2012r2: ami-e71acc8a
+Resources:
+  rSysAdminRole:
+      Type: AWS::IAM::Role
+      Properties:
+          AssumeRolePolicyDocument:
+              Statement:
+                - Effect: Allow
+                  Principal:
+                      Service:
+                        - ec2.amazonaws.com
+                  Action:
+                    - sts:AssumeRole
+  rSysAdminProfile:
+      Type: AWS::IAM::InstanceProfile
+      DependsOn: rSysAdminRole
+      Properties:
+          Path: /
+          Roles:
+            - !Ref rSysAdminRole
+  rSysAdmin:
+      Type: AWS::IAM::Group
+      Properties:
+          Path: /
+  rSysAdminPolicy:
+      Type: AWS::IAM::ManagedPolicy
+      Properties:
+          PolicyDocument:
+              Version: 2012-10-17
+              Statement:
+                - Effect: Allow
+                  NotAction: iam:*
+                  Resource: '*'
+                  Condition:
+                      Bool:
+                          aws:MultiFactorAuthPresent: true
+                - Effect: Deny
+                  Action: aws-portal:*Billing
+                  Resource: '*'
+                - Effect: Deny
+                  Action:
+                    - cloudtrail:DeleteTrail
+                    - cloudtrail:StopLogging
+                    - cloudtrail:UpdateTrail
+                  Resource: '*'
+                - Effect: Deny
+                  Action:
+                    - kms:Create*
+                    - kms:Revoke*
+                    - kms:Enable*
+                    - kms:Get*
+                    - kms:Disable*
+                    - kms:Delete*
+                    - kms:Put*
+                    - kms:Update*
+                  Resource: '*'
+          Roles:
+            - !Ref rSysAdminRole
+          Groups:
+            - !Ref rSysAdmin
+  WindowsSecurityGroup:
+    Type: 'AWS::EC2::SecurityGroup'
+    Properties:
+      GroupDescription: Enable HTTP and RDP
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: '80'
+          ToPort: '80'
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: '3389'
+          ToPort: '3389'
+          CidrIp: !Ref SourceCidrForRDP
+  WindowsEIP:
+    Type: 'AWS::EC2::EIP'
+    Properties:
+      InstanceId: !Ref Windows
+  Windows:
+    Type: 'AWS::EC2::Instance'
+    Metadata:
+      AWS::CloudFormation::Authentication:
+        default:
+          type: s3
+          buckets:
+          - free-bucket
+          roleName: !Ref 'rSysAdminRole'
+      AWS::CloudFormation::Init:
+        config:
+          sources:
+            c:\inetpub\deploy: 'https://s3-us-west-2.amazonaws.com/freebe-bucket/v2/app.zip'
+    Properties:
+      InstanceType: !Ref InstanceType
+      ImageId: !FindInMap
+        - AWSRegion2AMI
+        - !Ref 'AWS::Region'
+        - Windows2008r2
+      SecurityGroups:
+        - !Ref WindowsSecurityGroup
+      KeyName: !Ref KeyName
+      UserData: !Base64
+        'Fn::Sub': >
+          <script>
+
+          cfn-init.exe -v -s ${AWS::StackName} -r Windows --region ${AWS::Region}
+
+          </script>
+
+          <powershell>
+
+          # Run all deploy.ps1 files
+
+          $executionPolicy = Get-ExecutionPolicy
+
+          Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+
+          get-childitem c:\inetpub\deploy -recurse -force | ? {$_.name -eq "deploy.ps1"} |
+              ForEach-Object {
+                Invoke-Expression ($_.FullName + '
+                  -version ''v2''
+                  -dbServer ''127.0.0.1''
+                  -dbUsername ''theslyone''
+                  -dbPassword ''*Passw0rd#''
+                  -bucketRegion ''us-west-2''
+                  -bucketName ''freebe-bucket''
+                  -awsAccessKey ''access-key''
+                  -awsSecretKey ''secret-key''')
+              }
+
+          Set-ExecutionPolicy -Scope Process -ExecutionPolicy $executionPolicy
+
+          </powershell>
+Outputs:
+  WindowsURL:
+    Value: !Join
+      - ''
+      - - 'http://'
+        - !Ref WindowsEIP
+    Description: Landing Page

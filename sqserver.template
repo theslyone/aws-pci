@@ -1,0 +1,27 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: ''
+Parameters: {}
+Resources:
+  RDSDBI3N4HT:
+    Type: 'AWS::RDS::DBInstance'
+    Properties:
+      AllocatedStorage: '200'
+      DBInstanceClass: db.m1.small
+      Engine: sqlserver-se
+      EngineVersion: '12.00'
+      LicenseModel: license-included
+      MasterUserPassword: zePassw0rd!
+      MasterUsername: root
+      Iops: '0'
+      PreferredBackupWindow: '08:00-10:00'
+      BackupRetentionPeriod: '7'
+      OptionGroupName: !Ref RDSOG43B23
+  RDSOG43B23:
+    Type: 'AWS::RDS::OptionGroup'
+    Properties:
+      EngineName: sqlserver-se
+      MajorEngineVersion: '12.00'
+      OptionGroupDescription: MSSQL HA Option Group
+      OptionConfigurations:
+        - OptionName: Mirroring
+Outputs: {}
